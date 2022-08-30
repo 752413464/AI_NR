@@ -2,82 +2,73 @@
 import os
 import numpy as np
 import rawpy
-
+import cv2
+import imageio
 
 
 def normalization(input_data, black_level, white_level):
-    output_data = (input_data.astype(float) - black_level) / (white_level - black_level)
+    
+    output_data = np.maximum(input_data.astype(float), 0) / 65535
+   
     return output_data
+
 
 
 def inv_normalization(input_data, black_level, white_level):
-    output_data = np.clip(input_data, 0., 1.) * (white_level - black_level) + black_level
+
+    output_data = np.clip(input_data, 0., 1.) * 65535
     output_data = output_data.astype(np.uint16)
+
     return output_data
 
 
-def write_back_dng(src_path, dest_path, raw_data):
-    """
-    replace dng data
-    """
+def write_back_tiff(dest_path, raw_data, h, w , black_level, white_level ):
 
-    width = raw_data.shape[0]
-    height = raw_data.shape[1]
-  
-    falsie = os.path.getsize(src_path)
-    # print('H = %d, W = %d, full = %d'%(height, width, falsie))
-    data_len = width * height * 2
-    header_len = 8
+    CCM =[[1.639876127243042, -0.3148389160633087, -0.3250371813774109], 
+       [-0.16239236295223236, 1.3735886812210083, -0.21119630336761475],
+        [-0.022998422384262085, -0.32546359300613403, 1.3484619855880737]]
 
-    with open(src_path, "rb") as f_in:
-        data_all = f_in.read(falsie)
-        dng_format = data_all[5] + data_all[6] + data_all[7]
-        # print('data[5] = %f, data[6] = %f, data[7] = %f'%(data_all[5], data_all[6], data_all[7]))
+    wb_gain = [1.432167887687683, 1.0, 1.0, 2.160337448120117]
 
-    with open(src_path, "rb") as f_in:
-        header = f_in.read(header_len)
-        if dng_format != 0:
-            _ = f_in.read(data_len)
-            meta = f_in.read(falsie - header_len - data_len)
-        else:
-            meta = f_in.read(falsie - header_len - data_len)
-            _ = f_in.read(data_len)
+    gamma = 2.2
 
-        data = raw_data.tobytes()
+    raw_data = raw_data.clip(0., 1.)
 
-    with open(dest_path, "wb") as f_out:
-        f_out.write(header)
-        if dng_format != 0:
-            f_out.write(data)
-            f_out.write(meta)
-        else:
-            f_out.write(meta)
-            f_out.write(data)
+    raw_gain = raw_data * wb_gain
 
-    if os.path.getsize(src_path) != os.path.getsize(dest_path):
-        print("replace raw data failed, file size mismatch!")
-    # else:
-    #     print("replace raw data finished")
+    bayer = write_image(raw_gain, h, w)
+
+    bayer_inv = inv_normalization(bayer, black_level, white_level)
+
+    bayer_rgb = cv2.cvtColor(bayer_inv, cv2.COLOR_BAYER_BG2BGR).astype(np.float32) /65535
+
+    rgb_ccm = bayer_rgb.dot(np.array(CCM).T).clip(0, 1)
+
+    rgb_gamma = rgb_ccm ** (1 / gamma)
+   
+    rgb = inv_normalization(rgb_gamma, black_level, white_level)
+
+    imageio.imsave(dest_path, rgb)
+
 
 
 def read_image(input_path):
-    raw = rawpy.imread(input_path)
-    raw_data = raw.raw_image_visible
-    height = raw_data.shape[0]
-    width = raw_data.shape[1]
 
-    raw_data_expand = np.expand_dims(raw_data, axis=2)
+    height = 3000
+    width = 4000
+    array= np.fromfile(input_path,dtype = np.uint16)
+    image = array.reshape([height,width])
+    image_rggb = image[::-1, ::-1]
+    raw_data_expand = np.expand_dims(image_rggb, axis=2)
     raw_data_expand_c = np.concatenate((raw_data_expand[0:height:2, 0:width:2, :],
                                         raw_data_expand[0:height:2, 1:width:2, :],
                                         raw_data_expand[1:height:2, 0:width:2, :],
                                         raw_data_expand[1:height:2, 1:width:2, :]), axis=2)
-    return raw_data_expand_c, height, width
-
+    
+    return raw_data_expand_c
 
 def write_image(input_data, height, width):
+
     output_data = input_data.reshape(height, width, 2, 2).transpose(0, 2, 1, 3).reshape(height*2, width*2)
-    # output_data = np.zeros((height, width), dtype=np.uint16)
-    # for channel_y in range(2):
-    #     for channel_x in range(2):
-    #         output_data[channel_y:height:2, channel_x:width:2] = input_data[0:, :, :, 2 * channel_y + channel_x]
-    return output_data
+    output_bggr = output_data[::-1, ::-1]
+    return output_bggr
