@@ -1,0 +1,139 @@
+
+import os
+import numpy as np
+import rawpy
+import cv2
+import imageio
+import h5py
+from dataloader.bay_aug import bayer_aug
+
+
+
+def inv_normalization(input_data):
+
+    output_data = np.clip(input_data, 0., 1.) * 65535
+    output_data = output_data.astype(np.uint16)
+
+    return output_data
+
+
+def write_back_raw(dest_path, raw_data, h, w):
+
+    raw_data = raw_data.clip(0, 1)
+    gamma = raw_data **(1/2.2)
+
+    bayer = write_image(gamma, h, w)
+    bayer_inv = inv_normalization (bayer)
+    
+    tiff_path = dest_path.split('.')[0] + '.tiff'
+
+    imageio.imsave(tiff_path, bayer_inv)
+
+ 
+
+def write_back_tiff(dest_path, raw_data, h, w):
+
+    CCM = [[ 1.9435506 , -0.7152609 , -0.2282897  ],
+       [-0.22348748,  1.4704359 , -0.24694835   ],
+       [ 0.03258422, -0.69400704,  1.6614228   ]]
+
+
+    wb_gain = [1.5826892852783203, 1.0, 1.0, 2.0117878913879395]
+
+    gamma = 2.2
+
+    raw_data = raw_data.clip(0., 1.)
+
+    raw_gain = raw_data * wb_gain
+
+    bayer = write_image(raw_gain, h, w)
+
+    bayer_inv = inv_normalization(bayer)
+
+    bayer_rgb = cv2.cvtColor(bayer_inv, cv2.COLOR_BAYER_BG2RGB).astype(np.float32) / 65535
+
+    rgb_ccm = bayer_rgb.dot(np.array(CCM).T).clip(0, 1)
+
+    rgb_gamma = rgb_ccm ** (1 / gamma)
+   
+    rgb = inv_normalization(rgb_gamma)
+
+    tiff_path = dest_path.split('.')[0] + '.tiff'
+
+    imageio.imsave(tiff_path, rgb)
+
+
+
+def read_image_train(input_path, h_pro, w_pro):
+
+    raw = h5py.File(input_path)
+    raw_data =  np.asarray(raw['x'])
+    raw_data = bayer_aug(raw_data, h_pro, w_pro,False, input_pattern='RGGB')
+    height = raw_data.shape[0]
+    width = raw_data.shape[1]
+
+    raw_data_expand = np.expand_dims(raw_data, axis=2)
+    raw_data_expand_c = np.concatenate((raw_data_expand[0:height:2, 0:width:2, :],
+                                            raw_data_expand[0:height:2, 1:width:2, :],
+                                            raw_data_expand[1:height:2, 0:width:2, :],
+                                            raw_data_expand[1:height:2, 1:width:2, :]), axis=2)
+    raw.close()
+    return raw_data_expand_c
+
+      
+    # with h5py.File(input_path, 'r') as raw:
+    #     raw_data = raw['x']
+    #     raw_data = np.asarray(raw_data)
+
+    #     raw_data = bayer_aug(raw_data, h_pro, w_pro,False, input_pattern='RGGB')
+
+    #     height = raw_data.shape[0]
+    #     width = raw_data.shape[1]
+
+    #     raw_data_expand = np.expand_dims(raw_data, axis=2)
+    #     raw_data_expand = np.concatenate((raw_data_expand[0:height:2, 0:width:2, :],
+    #                                         raw_data_expand[0:height:2, 1:width:2, :],
+    #                                         raw_data_expand[1:height:2, 0:width:2, :],
+    #                                         raw_data_expand[1:height:2, 1:width:2, :]), axis=2)
+    # raw_data_expand_c = raw_data_expand
+    return raw_data_expand_c
+
+
+def read_image(input_path):
+
+    raw = h5py.File(input_path)
+    raw_data =  np.asarray(raw['x'])
+   
+    height = raw_data.shape[0]
+    width = raw_data.shape[1]
+
+    raw_data_expand = np.expand_dims(raw_data, axis=2)
+    raw_data_expand_c = np.concatenate((raw_data_expand[0:height:2, 0:width:2, :],
+                                            raw_data_expand[0:height:2, 1:width:2, :],
+                                            raw_data_expand[1:height:2, 0:width:2, :],
+                                            raw_data_expand[1:height:2, 1:width:2, :]), axis=2)
+    raw.close()
+    return raw_data_expand_c
+
+    # with h5py.File(input_path, 'r') as raw:
+    #     raw_data = raw['x']
+    #     raw_data = np.asarray(raw_data)
+
+    #     height = raw_data.shape[0]
+    #     width = raw_data.shape[1]
+
+    #     raw_data_expand = np.expand_dims(raw_data, axis=2)
+    #     raw_data_expand = np.concatenate((raw_data_expand[0:height:2, 0:width:2, :],
+    #                                         raw_data_expand[0:height:2, 1:width:2, :],
+    #                                         raw_data_expand[1:height:2, 0:width:2, :],
+    #                                         raw_data_expand[1:height:2, 1:width:2, :]), axis=2)
+    # raw_data_expand_c = raw_data_expand
+    # return raw_data_expand_c
+
+
+
+def write_image(input_data, height, width):
+
+    output_data = input_data.reshape(height, width, 2, 2).transpose(0, 2, 1, 3).reshape(height*2, width*2)
+
+    return output_data
