@@ -7,8 +7,8 @@ from torch.backends import cudnn
 from model.MPRNet import MPRNet
 from model.PMRID import PMRID
 from model.PMRID_caplusp import PMRID_caplusp
-from model.PMRID_up import PMRID_up
 from model.cycleisp import isp
+from model.PMRID_up import PMRID_up
 
 from train_zte import _train_zte
 from test_zte import _test_zte
@@ -27,6 +27,7 @@ def main(args):
 
     net_list = {
         'PMRID': PMRID(),
+        'PMRID_up': PMRID_up(),
         'MPR': MPRNet(),
         'PMRID_up':PMRID_up(),
         'PMRID_caplusp':PMRID_caplusp(),
@@ -89,27 +90,27 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     # Directories
-    parser.add_argument('--model_name', default='isp',  type=str)
+    parser.add_argument('--model_name', default='PMRID_caplusp',  type=str)
     parser.add_argument('--mode', default='train', choices=['train', 'test'], type=str)
-    parser.add_argument('--dataset', default='sidd', choices=['sony' , 'zte' , 'reno'], type = str)
+    parser.add_argument('--dataset', default='zte', choices=['sony' , 'zte' , 'reno'], type = str)
 
     # Train
     parser.add_argument('--data_dir', type=str, default='data/')
     parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--learning_rate', type=float, default=6e-4) # default=1e-4
+    parser.add_argument('--learning_rate', type=float, default=1e-3) # default=1e-4
     parser.add_argument('--weight_decay', type=float, default=0) ## default=0, 5e-2
-    parser.add_argument('--num_epoch', type=int, default=50)
-    parser.add_argument('--device', type=str, default = 'cuda:0')
+    parser.add_argument('--num_epoch', type=int, default=150)
+    parser.add_argument('--device', type=str, default = 'cuda:5')
     parser.add_argument('--num_worker', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.5)
     parser.add_argument('--test_dir', type=str, default='data/valid/')
+    parser.add_argument('--criterion', type = str, default = '0.05ssim')
+    parser.add_argument('--warm_up', type = bool, default = True)
     args = parser.parse_args()
 
     args.model_save_dir = os.path.join('demo_code/checkpoints/', args.model_name)
-    args.ckp = os.path.join(args.model_save_dir, args.dataset + '.pth')
-    # args.ckp = os.path.join(args.model_save_dir,'zte.pth')
+    args.ckp = os.path.join(args.model_save_dir, args.dataset + args.criterion +'.pth')
     # args.ckp = ('/mnt/AI denoise/weights/MPRNet_best_64_L1_aug.pth')
-
     args.result_dir = os.path.join('demo_code/results/', args.model_name, str(args.dataset) + '_image')
 
     main(args)
