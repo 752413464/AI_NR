@@ -33,36 +33,42 @@ def muti_mse_loss_fusion(d1, d2, d3, d4, d5, d6, labels_v):
 	return loss1, loss
 
 
-class Get_gradient_sobel(nn.Module):
-    def __init__(self):
-        super(Get_gradient_sobel, self).__init__()
+
+
+
+class sobel_loss(nn.Module):
+    def __init__(self, alpha):
+        super(sobel_loss, self).__init__()
         kernel_v = [[-1, 0, 1], 
                     [-2, 0, 2], 
                     [-1, 0, 1]]
         kernel_h = [[1, 2, 1], 
                     [0, 0, 0], 
                     [-1, -2, -1]]
-        kernel_h = torch.DoubleTensor(kernel_h).unsqueeze(0).unsqueeze(0)
-        kernel_v = torch.DoubleTensor(kernel_v).unsqueeze(0).unsqueeze(0)
+        kernel_h = torch.FloatTensor(kernel_h).unsqueeze(0).unsqueeze(0)
+        kernel_v = torch.FloatTensor(kernel_v).unsqueeze(0).unsqueeze(0)
         self.weight_h = nn.Parameter(data = kernel_h, requires_grad = False)
         self.weight_v = nn.Parameter(data = kernel_v, requires_grad = False)
+        self.alpha = alpha
 
-    def forward(self, x):
-        x0 = x[:, 0].double()
-        x1 = x[:, 1].double()
-        x2 = x[:, 2].double()
-        x3 = x[:, 3].double()
-        x0_v = F.conv2d(x0.unsqueeze(1), self.weight_v, padding=1)
-        x0_h = F.conv2d(x0.unsqueeze(1), self.weight_h, padding=1)
+    def forward(self, x, y):
 
-        x1_v = F.conv2d(x1.unsqueeze(1), self.weight_v, padding=1)
-        x1_h = F.conv2d(x1.unsqueeze(1), self.weight_h, padding=1)
+        x_ori, y_ori = x, y
+        x0 = x[:, 0].unsqueeze(1)
+        x1 = x[:, 1].unsqueeze(1)
+        x2 = x[:, 2].unsqueeze(1)
+        x3 = x[:, 3].unsqueeze(1)
+        x0_v = F.conv2d(x0, self.weight_v, padding=1)
+        x0_h = F.conv2d(x0, self.weight_h, padding=1)
 
-        x2_v = F.conv2d(x2.unsqueeze(1), self.weight_v, padding=1)
-        x2_h = F.conv2d(x2.unsqueeze(1), self.weight_h, padding=1)
+        x1_v = F.conv2d(x1, self.weight_v, padding=1)
+        x1_h = F.conv2d(x1, self.weight_h, padding=1)
+
+        x2_v = F.conv2d(x2, self.weight_v, padding=1)
+        x2_h = F.conv2d(x2, self.weight_h, padding=1)
         
-        x3_v = F.conv2d(x3.unsqueeze(1), self.weight_v, padding=1)
-        x3_h = F.conv2d(x3.unsqueeze(1), self.weight_h, padding=1)
+        x3_v = F.conv2d(x3, self.weight_v, padding=1)
+        x3_h = F.conv2d(x3, self.weight_h, padding=1)
 
         x0 = torch.sqrt(torch.pow(x0_v, 2) + torch.pow(x0_h, 2) + 1e-6)
         x1 = torch.sqrt(torch.pow(x1_v, 2) + torch.pow(x1_h, 2) + 1e-6)
@@ -70,7 +76,37 @@ class Get_gradient_sobel(nn.Module):
         x3 = torch.sqrt(torch.pow(x3_v, 2) + torch.pow(x3_h, 2) + 1e-6)
 
         x = torch.cat([x0, x1, x2, x3], dim=1)
-        return x
+
+        y0 = y[:, 0].unsqueeze(1)
+        y1 = y[:, 1].unsqueeze(1)
+        y2 = y[:, 2].unsqueeze(1)
+        y3 = y[:, 3].unsqueeze(1)
+
+        y0_v = F.conv2d(y0, self.weight_v, padding=1)
+        y0_h = F.conv2d(y0, self.weight_h, padding=1)
+
+        y1_v = F.conv2d(y1, self.weight_v, padding=1)
+        y1_h = F.conv2d(y1, self.weight_h, padding=1)
+
+        y2_v = F.conv2d(y2, self.weight_v, padding=1)
+        y2_h = F.conv2d(y2, self.weight_h, padding=1)
+        
+        y3_v = F.conv2d(y3, self.weight_v, padding=1)
+        y3_h = F.conv2d(y3, self.weight_h, padding=1)
+
+        y0 = torch.sqrt(torch.pow(y0_v, 2) + torch.pow(y0_h, 2) + 1e-6)
+        y1 = torch.sqrt(torch.pow(y1_v, 2) + torch.pow(y1_h, 2) + 1e-6)
+        y2 = torch.sqrt(torch.pow(y2_v, 2) + torch.pow(y2_h, 2) + 1e-6)
+        y3 = torch.sqrt(torch.pow(y3_v, 2) + torch.pow(y3_h, 2) + 1e-6)
+
+        y = torch.cat([y0, y1, y2, y3], dim=1)
+
+        loss_l1 = F.l1_loss(x_ori, y_ori, reduction='none') 
+        loss_sobel = F.l1_loss(x, y, reduction='none')
+
+        total_loss = (1 - self.alpha) * loss_l1 + self.alpha * loss_sobel
+
+        return total_loss.mean()
 
 
 
@@ -83,11 +119,11 @@ class MS_SSIM_L1_LOSS(nn.Module):
     I set 255 and 1 for gray image as default.
     """
 
-    def __init__(self,  device, 
+    def __init__(self,  device, alpha, 
     gaussian_sigmas=[0.5, 1.0, 2.0, 4.0, 8.0],
                  data_range=1.0,
                  K=(0.01, 0.03),  # c1,c2
-                 alpha=0.05,  # weight of ssim and l1 loss
+              # weight of ssim and l1 loss
                  compensation=200.0,  # final factor for total loss
                  channel=4,
                 ):  # RGB image should set to 3 and Gray image should be set to 1
@@ -109,7 +145,7 @@ class MS_SSIM_L1_LOSS(nn.Module):
             elif self.channel == 4:
                 # r0,g0,b0,r1,g1,b1,...,rM,gM,bM
                 g_masks[self.channel * idx + 0, 0, :, :] = self._fspecial_gauss_2d(filter_size,
-                                                                           sigma)  # 每层mask对应不同的sigma
+                                                                       sigma)  # 每层mask对应不同的sigma
                 g_masks[self.channel * idx + 1, 0, :, :] = self._fspecial_gauss_2d(filter_size, sigma)
                 g_masks[self.channel * idx + 2, 0, :, :] = self._fspecial_gauss_2d(filter_size, sigma)
                 g_masks[self.channel * idx + 3, 0, :, :] = self._fspecial_gauss_2d(filter_size, sigma)
@@ -184,6 +220,7 @@ class MS_SSIM_L1_LOSS(nn.Module):
         return loss_mix.mean()
 
 
+
 def gaussian(window_size, sigma):
     gauss = torch.Tensor([math.exp(-(x - window_size//2)**2/float(2*sigma**2)) for x in range(window_size)])
     return gauss/gauss.sum()
@@ -247,6 +284,7 @@ def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False,
     if full:
         return ret, cs
     return ret
+
 
 
 
