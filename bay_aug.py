@@ -51,7 +51,7 @@ def bayer_unify(raw: np.ndarray, input_pattern: str, target_pattern: str, mode: 
     return out
 
 
-def bayer_aug(raw: np.ndarray, flip_h_pro: float, flip_w_pro: float, transpose: False, input_pattern: str) -> np.ndarray:
+def bayer_aug(raw: np.ndarray, input_pattern: str) -> np.ndarray:
     """
     Apply augmentation to a bayer raw image.
     Parameters
@@ -78,15 +78,19 @@ def bayer_aug(raw: np.ndarray, flip_h_pro: float, flip_w_pro: float, transpose: 
     aug_pattern, target_pattern = input_pattern, input_pattern
 
     out = raw
-    if flip_h_pro > 0.5:
+    if np.random.random()> 0.5:
+
         out = out[::-1, :]
+        out = np.ascontiguousarray(out)
         aug_pattern = aug_pattern[2] + aug_pattern[3] + aug_pattern[0] + aug_pattern[1]
-    if flip_w_pro > 0.5:
+    if np.random.random() > 0.5:
+
         out = out[:, ::-1]
+        out = np.ascontiguousarray(out)
         aug_pattern = aug_pattern[1] + aug_pattern[0] + aug_pattern[3] + aug_pattern[2]
-    if transpose:
-        out = out.T
-        aug_pattern = aug_pattern[0] + aug_pattern[2] + aug_pattern[1] + aug_pattern[3]
+    # if transpose:
+    #     out = out.T
+    #     aug_pattern = aug_pattern[0] + aug_pattern[2] + aug_pattern[1] + aug_pattern[3]
 
     out = bayer_unify(out, aug_pattern, target_pattern, "crop")
     return out
