@@ -9,7 +9,6 @@ b.gan-model看趋势是未来噪声合成的一个点，但ELD和rethink synth�
 c.除了real-model基本就只能考虑标定senor合成pg-model，目前也是这样考虑的，clean数据现在有zte和旷视的去噪比赛，以及SID的两百张大图，可以考虑ntire2019旷视的操作，加点bayer-aug，数据暂且这么处理。
 d.理论上直接拟合real-model如sidd等提供的data最合适，但前期由于种种原因没有用好，可能是model确实太小，盲拟合效果差强人意，但有更好的噪声数据解决方案，最后再考虑它。
 
-
 2.NN model
 a.端侧AI芯片的算力大致在1-5T，直接排除一些堆算力的model如MPR和Restformer等，后续加工时可以考虑对这些model裁剪。
 b.FLops->param, MPR等param倒不算很高，但Flops过高，处理单帧已经很耗时，基本不可能实时，所以设计model的基本原则是param高且Flops尽可能低，模型表征能力强，且推理速度快。
