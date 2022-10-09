@@ -6,6 +6,19 @@ from thop import profile
 import numpy as np
 import torch.nn.functional as F
 
+
+
+class UpSample(nn.Module):
+    def __init__(self, in_channels,out_channels):
+        super(UpSample, self).__init__()
+        self.up = nn.Sequential(nn.Upsample(scale_factor=2, mode='bicubic', align_corners=False),
+                                nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0, bias=False))
+
+    def forward(self, x):
+        x = self.up(x)
+        return x
+
+
 def Conv2D(
         in_channels: int, out_channels: int,
         kernel_size: int, stride: int, padding: int,
@@ -28,7 +41,7 @@ def Conv2D(
             bias=True,
         )
     if has_relu:
-        modules['relu'] = nn.ReLU()
+        modules['relu'] = nn.LeakyReLU(0.2)
 
     return nn.Sequential(modules)
 
@@ -40,13 +53,11 @@ class EncoderBlock(nn.Module):
 
         self.conv1 = Conv2D(in_channels, mid_channels, kernel_size=5, stride=stride, padding=2, is_seperable=True, has_relu=True)
         self.conv2 = Conv2D(mid_channels, out_channels, kernel_size=5, stride=1, padding=2, is_seperable=True, has_relu=False)
-
         self.proj = (
-            nn.Identity()
-            if stride == 1 and in_channels == out_channels else
+            nn.Identity() if stride == 1 and in_channels == out_channels else
             Conv2D(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, is_seperable=True, has_relu=False)
         )
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU(0.2)
 
     def forward(self, x):
         proj = self.proj(x)
@@ -110,45 +121,48 @@ class DecoderStage(nn.Module):
         super().__init__()
 
         self.decode_conv = DecoderBlock(in_channels, in_channels, kernel_size=3)
+        
         self.upsample = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2, padding=0)
+        # self.upsample = UpSample(in_channels, out_channels)
+     
         self.proj_conv = Conv2D(skip_in_channels, out_channels, kernel_size=3, stride=1, padding=1, is_seperable=True, has_relu=True)
         # M.init.msra_normal_(self.upsample.weight, mode='fan_in', nonlinearity='linear')
 
     def forward(self, inputs):
         inp, skip = inputs
-
-        x = self.decode_conv(inp)
-        x = self.upsample(x)
+        x = self.upsample(inp)
         y = self.proj_conv(skip)
         return x + y
 
 
-class PMRID(nn.Module):
+class PMRID_caplusp(nn.Module):
 
     def __init__(self):
         super().__init__()
 
-        self.conv0 = Conv2D(in_channels=4, out_channels=16, kernel_size=3, padding=1, stride=1, is_seperable=False, has_relu=True)
+        self.conv0 = Conv2D(in_channels=8, out_channels=16, kernel_size=3, padding=1, stride=1, is_seperable=False, has_relu=True)
         self.enc1 = EncoderStage(in_channels=16, out_channels=64, num_blocks=2)
-        self.enc2 = EncoderStage(in_channels=64, out_channels=128, num_blocks=2)
-        self.enc3 = EncoderStage(in_channels=128, out_channels=256, num_blocks=4)
-        self.enc4 = EncoderStage(in_channels=256, out_channels=512, num_blocks=4)
+        self.enc2 = EncoderStage(in_channels=64, out_channels=256, num_blocks=2)
+        self.enc3 = EncoderStage(in_channels=256, out_channels=512, num_blocks=4)
+        self.enc4 = EncoderStage(in_channels=512, out_channels=1024, num_blocks=4)
 
-        self.encdec = Conv2D(in_channels=512, out_channels=64, kernel_size=3, padding=1, stride=1, is_seperable=True, has_relu=True)
-        self.dec1 = DecoderStage(in_channels=64, skip_in_channels=256, out_channels=64)
-        self.dec2 = DecoderStage(in_channels=64, skip_in_channels=128, out_channels=32)
-        self.dec3 = DecoderStage(in_channels=32, skip_in_channels=64, out_channels=32)
+        self.encdec = Conv2D(in_channels=1024, out_channels=256, kernel_size=3, padding=1, stride=1, is_seperable=True, has_relu=True)
+        self.dec1 = DecoderStage(in_channels=256, skip_in_channels=512, out_channels=128)
+        self.dec2 = DecoderStage(in_channels=128, skip_in_channels=256, out_channels=64)
+        self.dec3 = DecoderStage(in_channels=64, skip_in_channels=64, out_channels=32)
         self.dec4 = DecoderStage(in_channels=32, skip_in_channels=16, out_channels=16)
 
         self.out0 = DecoderBlock(in_channels=16, out_channels=16, kernel_size=3)
         self.out1 = Conv2D(in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1, is_seperable=False, has_relu=False)
 
-    def forward(self, inp):
+    def forward(self, noise, var):
 
-        n, c, h, w = inp.shape
+        inp = torch.cat([noise, var],  dim = 1)
+        _, _, h, w = inp.shape
         h_pad = 32 - h % 32 if not h % 32 == 0 else 0
         w_pad = 32 - w % 32 if not w % 32 == 0 else 0
         inp = F.pad(inp, (0, w_pad, 0, h_pad), 'replicate')
+        noise =  F.pad(noise, (0, w_pad, 0, h_pad), 'replicate')
 
         conv0 = self.conv0(inp)
         conv1 = self.enc1(conv0)
@@ -166,7 +180,7 @@ class PMRID(nn.Module):
         x = self.out0(x)
         x = self.out1(x)
     
-        pred = inp + x
+        pred = noise + x
 
         pred = pred[:, :, :h, :w]
         
@@ -176,8 +190,8 @@ class PMRID(nn.Module):
 
 if __name__ == "__main__":
 
-    flops, params = profile(PMRID(), inputs = (torch.randn(1, 4, 256, 256), ))
-    print('FLOPs = ' + str(flops/1000**3) + 'G' + '(PMRID)')
+    flops, params = profile(PMRID_caplusp(), inputs = (torch.randn(1, 4, 2048, 1024), ))
+    print('FLOPs = ' + str(flops/1000**3) + 'G' + '(PMRID_caplusp)')
     print('Params = ' + str(params/1000**2) + 'M' )
 
 pass
